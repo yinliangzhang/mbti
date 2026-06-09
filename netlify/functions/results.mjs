@@ -1,4 +1,5 @@
-import { getStore } from "@netlify/blobs";
+import { randomUUID } from "node:crypto";
+import { connectLambda, getStore } from "@netlify/blobs";
 
 const HEADERS = {
   "content-type": "application/json; charset=utf-8",
@@ -45,56 +46,62 @@ function publicRecord(record) {
 }
 
 function createId() {
-  if (crypto.randomUUID) {
-    return crypto.randomUUID().replaceAll("-", "").slice(0, 16);
-  }
-  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  return randomUUID().replaceAll("-", "").slice(0, 16);
 }
 
 export async function handler(event) {
-  const store = getStore("mbti-results");
+  try {
+    connectLambda(event);
+    const store = getStore("mbti-results");
 
-  if (event.httpMethod === "GET") {
-    const id = event.queryStringParameters?.id;
-    if (!id) return json(400, { error: "缺少结果 ID。" });
+    if (event.httpMethod === "GET") {
+      const id = event.queryStringParameters?.id;
+      if (!id) return json(400, { error: "缺少结果 ID。" });
 
-    const record = await store.get(id, { type: "json" });
-    if (!record) return json(404, { error: "没有找到这份结果。" });
+      const record = await store.get(id, { type: "json" });
+      if (!record) return json(404, { error: "没有找到这份结果。" });
 
-    return json(200, { record: publicRecord(record) });
-  }
-
-  if (event.httpMethod === "POST") {
-    let body;
-    try {
-      body = JSON.parse(event.body || "{}");
-    } catch {
-      return json(400, { error: "请求格式错误。" });
+      return json(200, { record: publicRecord(record) });
     }
 
-    const profile = sanitizeProfile(body.profile);
-    if (profile.error) return json(400, { error: profile.error });
+    if (event.httpMethod === "POST") {
+      let body;
+      try {
+        body = JSON.parse(event.body || "{}");
+      } catch {
+        return json(400, { error: "请求格式错误。" });
+      }
 
-    if (!body.result?.type || !body.result?.dimensions) {
-      return json(400, { error: "缺少测试结果。" });
+      const profile = sanitizeProfile(body.profile);
+      if (profile.error) return json(400, { error: profile.error });
+
+      if (!body.result?.type || !body.result?.dimensions) {
+        return json(400, { error: "缺少测试结果。" });
+      }
+
+      const id = createId();
+      const record = {
+        id,
+        createdAt: new Date().toISOString(),
+        profile,
+        result: body.result,
+        answers: body.answers ?? {}
+      };
+
+      await store.setJSON(id, record);
+
+      return json(201, {
+        id,
+        record: publicRecord(record)
+      });
     }
 
-    const id = createId();
-    const record = {
-      id,
-      createdAt: new Date().toISOString(),
-      profile,
-      result: body.result,
-      answers: body.answers ?? {}
-    };
-
-    await store.setJSON(id, record);
-
-    return json(201, {
-      id,
-      record: publicRecord(record)
+    return json(405, { error: "不支持的请求方法。" });
+  } catch (error) {
+    console.error("MBTI result function failed:", error);
+    return json(500, {
+      error: "后台记录失败，请稍后重试。",
+      detail: error instanceof Error ? error.message : "Unknown error"
     });
   }
-
-  return json(405, { error: "不支持的请求方法。" });
 }

@@ -93,6 +93,17 @@ function getShareUrl(id) {
   return `${window.location.origin}${window.location.pathname}?result=${encodeURIComponent(id)}`;
 }
 
+async function readApiPayload(response) {
+  const text = await response.text();
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return {
+      error: response.ok ? "后台响应格式错误。" : `后台接口异常（HTTP ${response.status}）。`
+    };
+  }
+}
+
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [savedProgress, setSavedProgress] = useState(() => readStorage(STORAGE_KEY, null));
@@ -112,7 +123,7 @@ export default function App() {
 
     fetch(`/api/results?id=${encodeURIComponent(sharedId)}`)
       .then(async (response) => {
-        const payload = await response.json();
+        const payload = await readApiPayload(response);
         if (!response.ok) throw new Error(payload.error || "分享结果读取失败。");
         return payload.record;
       })
@@ -184,7 +195,7 @@ export default function App() {
       })
     });
 
-    const payload = await response.json();
+    const payload = await readApiPayload(response);
     if (!response.ok) throw new Error(payload.error || "提交失败，请稍后重试。");
 
     saveHistory(payload.record);
@@ -400,7 +411,7 @@ function QuizScreen({ answers, currentIndex, dispatch }) {
   );
 }
 
-function ProfileScreen({ onBack, onSubmit, result }) {
+function ProfileScreen({ onBack, onSubmit }) {
   const [profile, setProfile] = useState({ nickname: "", phone: "" });
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -437,7 +448,7 @@ function ProfileScreen({ onBack, onSubmit, result }) {
       <p className="eyebrow">最后一步</p>
       <h1>填写信息后查看结果</h1>
       <p className="intro">
-        你的结果已生成：{result.type}。提交后会写入 Netlify 后台，并生成可转发的结果链接和分享海报。
+        提交后会写入后台记录，并生成可转发的结果链接和分享海报。你的结果会在提交成功后展示。
       </p>
 
       <form className="profile-form" onSubmit={handleSubmit}>
